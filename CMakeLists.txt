@@ -61,3 +61,15 @@ target_link_libraries(align
   ${PCL_LIBRARIES}
   ndt_omp
 )
+
+add_executable(match
+  apps/match.cpp
+)
+add_dependencies(match
+  ndt_omp
+)
+target_link_libraries(match
+  ${catkin_LIBRARIES}
+  ${PCL_LIBRARIES}
+  ndt_omp
+)
