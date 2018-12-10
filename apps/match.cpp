@@ -10,27 +10,6 @@
 #include <pclomp/ndt_omp.h>
 #include <pclomp/gicp_omp.h>
 
-// match point clouds and measure processing time
-pcl::PointCloud<pcl::PointXYZ>::Ptr match(pcl::Registration<pcl::PointXYZ, pcl::PointXYZ>::Ptr registration, const pcl::PointCloud<pcl::PointXYZ>::Ptr& target_cloud, const pcl::PointCloud<pcl::PointXYZ>::Ptr& source_cloud ) {
-  registration->setInputTarget(target_cloud);
-  registration->setInputSource(source_cloud);
-  pcl::PointCloud<pcl::PointXYZ>::Ptr matched(new pcl::PointCloud<pcl::PointXYZ>());
-
-  auto t1 = ros::WallTime::now();
-  registration->align(*matched);
-  auto t2 = ros::WallTime::now();
-  std::cout << "single : " << (t2 - t1).toSec() * 1000 << "[msec]" << std::endl;
-
-  for(int i=0; i<10; i++) {
-    registration->align(*matched);
-  }
-  auto t3 = ros::WallTime::now();
-  std::cout << "10times: " << (t3 - t2).toSec() * 1000 << "[msec]" << std::endl;
-  std::cout << "fitness: " << registration->getFitnessScore() << std::endl << std::endl;
-
-  return matched;
-}
-
 
 int main(int argc, char** argv) {
   if(argc != 3) {
@@ -57,7 +36,7 @@ int main(int argc, char** argv) {
   pcl::PointCloud<pcl::PointXYZ>::Ptr downsampled(new pcl::PointCloud<pcl::PointXYZ>());
 
   pcl::VoxelGrid<pcl::PointXYZ> voxelgrid;
-  voxelgrid.setLeafSize(0.2f, 0.2f, 0.2f);
+  voxelgrid.setLeafSize(0.1f, 0.1f, 0.1f);
 
   voxelgrid.setInputCloud(target_cloud);
   voxelgrid.filter(*downsampled);
@@ -71,11 +50,30 @@ int main(int argc, char** argv) {
 
   ros::Time::init();
   
-  // benchmark
   std::cout << "--- pcl::NDT ---" << std::endl;
   pcl::NormalDistributionsTransform<pcl::PointXYZ, pcl::PointXYZ>::Ptr ndt(new pcl::NormalDistributionsTransform<pcl::PointXYZ, pcl::PointXYZ>());
-  ndt->setResolution(2.0);
-  pcl::PointCloud<pcl::PointXYZ>::Ptr matched = match(ndt, target_cloud, source_cloud);
+  ndt->setResolution(1.0);
+  ndt->setInputTarget(target_cloud);
+  ndt->setInputSource(source_cloud);
+  pcl::PointCloud<pcl::PointXYZ>::Ptr matched1(new pcl::PointCloud<pcl::PointXYZ>());
+  auto t1 = ros::WallTime::now();
+  ndt->align(*matched1);
+  auto t2 = ros::WallTime::now();
+  std::cout << "single : " << (t2 - t1).toSec() * 1000 << "[msec]" << std::endl;
+  
+  std::cout << "--- pcl::NDT_OMP ---" << std::endl;
+  pclomp::NormalDistributionsTransform<pcl::PointXYZ, pcl::PointXYZ>::Ptr ndt_omp(new pclomp::NormalDistributionsTransform<pcl::PointXYZ, pcl::PointXYZ>());
+  ndt_omp->setResolution(1.0);
+  ndt_omp->setInputTarget(target_cloud);
+  ndt_omp->setInputSource(source_cloud);
+  ndt_omp->setNumThreads(8);
+  ndt_omp->setNeighborhoodSearchMethod(pclomp::DIRECT7);
+  pcl::PointCloud<pcl::PointXYZ>::Ptr matched(new pcl::PointCloud<pcl::PointXYZ>());
+  t1 = ros::WallTime::now();
+  ndt_omp->align(*matched);
+  t2 = ros::WallTime::now();
+  std::cout << "single : " << (t2 - t1).toSec() * 1000 << "[msec]" << std::endl; 
+  std::cout<<"Transform: \n"<<ndt_omp->getFinalTransformation()<<std::endl;
 
   // Saving transformed input cloud.
   pcl::io::savePCDFileASCII ("matched.pcd", *matched);
