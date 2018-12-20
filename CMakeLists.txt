@@ -4,6 +4,7 @@ project(ndt_omp)
 # -mavx causes a lot of errors!!
 add_definitions(-std=c++11 -msse -msse2 -msse3 -msse4 -msse4.1 -msse4.2)
 set(CMAKE_CXX_FLAGS "-std=c++11 -msse -msse2 -msse3 -msse4 -msse4.1 -msse4.2")
+#set(CMAKE_CXX_FLAGS "-std=c++11 -O0")
 
 # pcl 1.7 causes a segfault when it is built with debug mode
 set(CMAKE_BUILD_TYPE "RELEASE")
@@ -21,6 +22,10 @@ add_definitions(${PCL_DEFINITIONS})
 message(STATUS "PCL_INCLUDE_DIRS:" ${PCL_INCLUDE_DIRS})
 message(STATUS "PCL_LIBRARY_DIRS:" ${PCL_LIBRARY_DIRS})
 message(STATUS "PCL_DEFINITIONS:" ${PCL_DEFINITIONS})
+
+# 寻找sophus
+find_package( Sophus REQUIRED )
+include_directories( ${Sophus_INCLUDE_DIRS} )
 
 find_package(OpenMP)
 if (OPENMP_FOUND)
@@ -60,6 +65,7 @@ target_link_libraries(align
   ${catkin_LIBRARIES}
   ${PCL_LIBRARIES}
   ndt_omp
+  ${Sophus_LIBRARIES}
 )
 
 add_executable(match
@@ -72,4 +78,5 @@ target_link_libraries(match
   ${catkin_LIBRARIES}
   ${PCL_LIBRARIES}
   ndt_omp
+  ${Sophus_LIBRARIES}
 )

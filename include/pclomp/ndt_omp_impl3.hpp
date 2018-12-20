@@ -38,16 +38,9 @@
  * $Id$
  *
  */
-/***********************************************************************************
- AngleAxisd (Rotation Vector) replaces Eulur Angle with a matrix Lie group approach. 
- ***********************************************************************************/
 
-#ifndef PCL_REGISTRATION_NDT_OMP_IMPL2_H_
-#define PCL_REGISTRATION_NDT_OMP_IMPL2_H_
-
-#include <Eigen/LU>
-#include <sophus/so3.h>
-#include <sophus/se3.h>
+#ifndef PCL_REGISTRATION_NDT_OMP_IMPL_H_
+#define PCL_REGISTRATION_NDT_OMP_IMPL_H_
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 template<typename PointSource, typename PointTarget>
@@ -112,13 +105,10 @@ pclomp::NormalDistributionsTransform<PointSource, PointTarget>::computeTransform
 
   // Convert initial guess matrix to 6 element transformation vector
   Eigen::Matrix<double, 6, 1> p, delta_p, score_gradient;
-  //Eigen::Vector3f init_translation = eig_transformation.translation ();
-  //Eigen::Vector3f init_rotation = eig_transformation.rotation ().eulerAngles (0, 1, 2);
-  //p << init_translation (0), init_translation (1), init_translation (2),
-  //init_rotation (0), init_rotation (1), init_rotation (2);
-  // T(R,t)->李群SE(3)->李代数se(3)
-  Sophus::SE3 SE3_Rt(guess.block(0,0,3,3).cast<double>(),guess.block(0,3,3,1).cast<double>());
-  p=SE3_Rt.log();
+  Eigen::Vector3f init_translation = eig_transformation.translation ();
+  Eigen::Vector3f init_rotation = eig_transformation.rotation ().eulerAngles (0, 1, 2);
+  p << init_translation (0), init_translation (1), init_translation (2),
+  init_rotation (0), init_rotation (1), init_rotation (2);
 
   Eigen::Matrix<double, 6, 6> hessian;
 
@@ -134,16 +124,13 @@ pclomp::NormalDistributionsTransform<PointSource, PointTarget>::computeTransform
     previous_transformation_ = transformation_;
 
     // Solve for decent direction using newton method, line 23 in Algorithm 2 [Magnusson 2009]
-    // SVD instead of Newton method
     Eigen::JacobiSVD<Eigen::Matrix<double, 6, 6> > sv (hessian, Eigen::ComputeFullU | Eigen::ComputeFullV);
     // Negative for maximization as opposed to minimization
     delta_p = sv.solve (-score_gradient);
-    //delta_p=-hessian.inverse()*score_gradient;
-    //delta_p = -hessian.lu().solve (score_gradient);
 
     //Calculate step length with guarnteed sufficient decrease [More, Thuente 1994]
     delta_p_norm = delta_p.norm ();
-    // delta_p_norm 小于有效数字，delta_p_norm==delta_p_norm 为 false
+
     if (delta_p_norm == 0 || delta_p_norm != delta_p_norm)
     {
       trans_probability_ = score / static_cast<double> (input_->points.size ());
@@ -155,17 +142,15 @@ pclomp::NormalDistributionsTransform<PointSource, PointTarget>::computeTransform
     delta_p_norm = computeStepLengthMT (p, delta_p, delta_p_norm, step_size_, transformation_epsilon_ / 2, score, score_gradient, hessian, output);
     delta_p *= delta_p_norm;
 
-    /*transformation_ = (Eigen::Translation<float, 3> (static_cast<float> (delta_p (0)), static_cast<float> (delta_p (1)), static_cast<float> (delta_p (2))) *
+
+    transformation_ = (Eigen::Translation<float, 3> (static_cast<float> (delta_p (0)), static_cast<float> (delta_p (1)), static_cast<float> (delta_p (2))) *
                        Eigen::AngleAxis<float> (static_cast<float> (delta_p (3)), Eigen::Vector3f::UnitX ()) *
                        Eigen::AngleAxis<float> (static_cast<float> (delta_p (4)), Eigen::Vector3f::UnitY ()) *
-                       Eigen::AngleAxis<float> (static_cast<float> (delta_p (5)), Eigen::Vector3f::UnitZ ())).matrix ();*/
-    // 李代数se(3)->李群SE(3)->T(R,t)
-    transformation_=Sophus::SE3::exp(delta_p).matrix().cast<float>();
-   
-    //p = p + delta_p;
-    p=(Sophus::SE3::exp(delta_p)*Sophus::SE3::exp(p)).log();
-    //std::cout<<"\nndt_omp_impl2.hpp: "<<nr_iterations_<<"\ndelta_p"<<delta_p.transpose()<<"\np"<<p.transpose()<<std::endl<<final_transformation_<<std::endl;
-    
+                       Eigen::AngleAxis<float> (static_cast<float> (delta_p (5)), Eigen::Vector3f::UnitZ ())).matrix ();
+
+
+    p = p + delta_p;
+
     // Update Visualizer (untested)
     if (update_visualizer_ != 0)
       update_visualizer_ (output, std::vector<int>(), *target_, std::vector<int>() );
@@ -179,7 +164,7 @@ pclomp::NormalDistributionsTransform<PointSource, PointTarget>::computeTransform
     nr_iterations_++;
 
   }
-  // std::cout<<"nr_iterations_: "<<nr_iterations_<<std::endl;
+
   // Store transformation probability.  The realtive differences within each scan registration are accurate
   // but the normalization constants need to be modified for it to be globally accurate
   trans_probability_ = score / static_cast<double> (input_->points.size ());
@@ -201,7 +186,7 @@ pclomp::NormalDistributionsTransform<PointSource, PointTarget>::computeDerivativ
 	score_gradient.setZero();
 	hessian.setZero();
 	double score = 0;
-  // n 个线程，n个H,J再合并
+
   std::vector<double> scores(num_threads_);
   std::vector<Eigen::Matrix<double, 6, 1>, Eigen::aligned_allocator<Eigen::Matrix<double, 6, 1>>> score_gradients(num_threads_);
   std::vector<Eigen::Matrix<double, 6, 6>, Eigen::aligned_allocator<Eigen::Matrix<double, 6, 6>>> hessians(num_threads_);
@@ -279,8 +264,7 @@ pclomp::NormalDistributionsTransform<PointSource, PointTarget>::computeDerivativ
 			c_inv = cell->getInverseCov();
 
 			// Compute derivative of transform function w.r.t. transform vector, J_E and H_E in Equations 6.18 and 6.20 [Magnusson 2009]
-			//computePointDerivatives(x, point_gradient_, point_hessian_);
-			computePointDerivatives_AngleAxisd(x, p, point_gradient_, point_hessian_);
+			computePointDerivatives(x, point_gradient_, point_hessian_);
 			// Update score, gradient and hessian, lines 19-21 in Algorithm 2, according to Equations 6.10, 6.12 and 6.13, respectively [Magnusson 2009]
 			score_pt += updateDerivatives(score_gradient_pt, hessian_pt, point_gradient_, point_hessian_, x_trans, c_inv, compute_hessian);
 		}
@@ -495,69 +479,6 @@ pclomp::NormalDistributionsTransform<PointSource, PointTarget>::computePointDeri
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-template<typename PointSource, typename PointTarget> void
-pclomp::NormalDistributionsTransform<PointSource, PointTarget>::computePointDerivatives_AngleAxisd(
-  Eigen::Vector3d &x, Eigen::Matrix<double, 6, 1> &p,Eigen::Matrix<float, 4, 6>& point_gradient_, Eigen::Matrix<float, 24, 6>& point_hessian_, bool compute_hessian) const
-{
-        Eigen::Vector4f x4(x[0], x[1], x[2], 0.0f);
-	Eigen::Vector4f x_t=Sophus::SE3::exp(p).matrix().cast<float>()*x4;
-	//std::cout<<"rotation_vector"<<rotation_vector.toRotationMatrix()<<std::endl<<x<<x_t<<std::endl;
-	// Derivative w.r.t. ith element of transform vector corresponds to column i,Ji=d TP/(di)
-	point_gradient_(1, 3) = -x_t(2);
-	point_gradient_(2, 3) =  x_t(1);
-	point_gradient_(0, 4) =  x_t(2);
-	point_gradient_(2, 4) = -x_t(0);
-	point_gradient_(0, 5) = -x_t(1);
-	point_gradient_(1, 5) =  x_t(0);
-
-	if (compute_hessian)
-	{
-		// Calculate second derivative of Transformation w.r.t. transform vector p(translation,AngleAxisd).
-		// Derivative w.r.t. ith and jth elements of transform vector corresponds to the 3x1 block matrix starting at (3i,j), Equation Hij=d2 TP/(didj)
-		point_hessian_.block<4, 1>((9/3)*4, 3)  = Eigen::Vector4f(0,-x_t(1),-x_t(2),0.0f);
-		point_hessian_.block<4, 1>((12/3)*4, 3) = Eigen::Vector4f(x_t(1),0,0,0.0f);
-		point_hessian_.block<4, 1>((15/3)*4, 3) = Eigen::Vector4f(x_t(2),0,0,0.0f);
-		point_hessian_.block<4, 1>((9/3)*4, 4)  = Eigen::Vector4f(0,x_t(0),0,0.0f);
-		point_hessian_.block<4, 1>((12/3)*4, 4) = Eigen::Vector4f(-x_t(0),0,-x_t(2),0.0f);
-		point_hessian_.block<4, 1>((15/3)*4, 4) = Eigen::Vector4f(0,x_t(2),0,0.0f);
-		point_hessian_.block<4, 1>((9/3)*4, 5)  = Eigen::Vector4f(0,0,x_t(0),0.0f);
-		point_hessian_.block<4, 1>((12/3)*4, 5) = Eigen::Vector4f(0,0,x_t(1),0.0f);
-		point_hessian_.block<4, 1>((15/3)*4, 5) = Eigen::Vector4f(-x_t(0),-x_t(1),0,0.0f);
-	}
-}
-//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-template<typename PointSource, typename PointTarget> void
-pclomp::NormalDistributionsTransform<PointSource, PointTarget>::computePointDerivatives_AngleAxisd(
-  Eigen::Vector3d &x, Eigen::Matrix<double, 6, 1> &p,Eigen::Matrix<double, 3, 6>& point_gradient_, Eigen::Matrix<double, 18, 6>& point_hessian_, bool compute_hessian) const
-{
-        Eigen::Vector4d x4(x[0], x[1], x[2], 0.0d);
-	Eigen::Vector4d x_t=Sophus::SE3::exp(p).matrix()*x4;
-	// Calculate first derivative of Transformation w.r.t. transform vector p(translation,AngleAxisd).
-	// Derivative w.r.t. ith element of transform vector corresponds to column i,Ji=d TP/(di)
-	point_gradient_(1, 3) = -x_t(2);
-	point_gradient_(2, 3) =  x_t(1);
-	point_gradient_(0, 4) =  x_t(2);
-	point_gradient_(2, 4) = -x_t(0);
-	point_gradient_(0, 5) = -x_t(1);
-	point_gradient_(1, 5) =  x_t(0);
-
-	if (compute_hessian)
-	{
-		// Calculate second derivative of Transformation w.r.t. transform vector p(translation,AngleAxisd).
-		// Derivative w.r.t. ith and jth elements of transform vector corresponds to the 3x1 block matrix starting at (3i,j), Equation Hij=d2 TP/(didj)
-		point_hessian_.block<3, 1>(9, 3)  = Eigen::Vector3d(0,-x_t(1),-x_t(2));
-		point_hessian_.block<3, 1>(12, 3) = Eigen::Vector3d(x_t(1),0,0);
-		point_hessian_.block<3, 1>(15, 3) = Eigen::Vector3d(x_t(2),0,0);
-		point_hessian_.block<3, 1>(9, 4)  = Eigen::Vector3d(0,x_t(0),0);
-		point_hessian_.block<3, 1>(12, 4) = Eigen::Vector3d(-x_t(0),0,-x_t(2));
-		point_hessian_.block<3, 1>(15, 4) = Eigen::Vector3d(0,x_t(2),0);
-		point_hessian_.block<3, 1>(9, 5)  = Eigen::Vector3d(0,0,x_t(0));
-		point_hessian_.block<3, 1>(12, 5) = Eigen::Vector3d(0,0,x_t(1));
-		point_hessian_.block<3, 1>(15, 5) = Eigen::Vector3d(-x_t(0),-x_t(1),0);
-	}
-}
-
-//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 template<typename PointSource, typename PointTarget> double
 pclomp::NormalDistributionsTransform<PointSource, PointTarget>::updateDerivatives(Eigen::Matrix<double, 6, 1> &score_gradient,
 	Eigen::Matrix<double, 6, 6> &hessian,
@@ -616,7 +537,7 @@ pclomp::NormalDistributionsTransform<PointSource, PointTarget>::updateDerivative
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 template<typename PointSource, typename PointTarget> void
 pclomp::NormalDistributionsTransform<PointSource, PointTarget>::computeHessian (Eigen::Matrix<double, 6, 6> &hessian,
-                                                                             PointCloudSource &trans_cloud, Eigen::Matrix<double, 6, 1> &p)
+                                                                             PointCloudSource &trans_cloud, Eigen::Matrix<double, 6, 1> &)
 {
   // Original Point and Transformed Point
   PointSource x_pt, x_trans_pt;
@@ -664,8 +585,7 @@ pclomp::NormalDistributionsTransform<PointSource, PointTarget>::computeHessian (
         c_inv = cell->getInverseCov ();
 
         // Compute derivative of transform function w.r.t. transform vector, J_E and H_E in Equations 6.18 and 6.20 [Magnusson 2009]
-        //computePointDerivatives (x, point_gradient_, point_hessian_);
-	computePointDerivatives_AngleAxisd(x,p, point_gradient_, point_hessian_);
+        computePointDerivatives (x, point_gradient_, point_hessian_);
         // Update hessian, lines 21 in Algorithm 2, according to Equations 6.10, 6.12 and 6.13, respectively [Magnusson 2009]
         updateHessian (hessian, point_gradient_, point_hessian_, x_trans, c_inv);
       }
@@ -888,12 +808,11 @@ pclomp::NormalDistributionsTransform<PointSource, PointTarget>::computeStepLengt
 
   x_t = x + step_dir * a_t;
 
-  /*final_transformation_ = (Eigen::Translation<float, 3>(static_cast<float> (x_t (0)), static_cast<float> (x_t (1)), static_cast<float> (x_t (2))) *
+  final_transformation_ = (Eigen::Translation<float, 3>(static_cast<float> (x_t (0)), static_cast<float> (x_t (1)), static_cast<float> (x_t (2))) *
                            Eigen::AngleAxis<float> (static_cast<float> (x_t (3)), Eigen::Vector3f::UnitX ()) *
                            Eigen::AngleAxis<float> (static_cast<float> (x_t (4)), Eigen::Vector3f::UnitY ()) *
-                           Eigen::AngleAxis<float> (static_cast<float> (x_t (5)), Eigen::Vector3f::UnitZ ())).matrix ();*/
-  final_transformation_ = Sophus::SE3::exp(x_t).matrix().cast<float>();
-  
+                           Eigen::AngleAxis<float> (static_cast<float> (x_t (5)), Eigen::Vector3f::UnitZ ())).matrix ();
+
   // New transformed point cloud
   transformPointCloud (*input_, trans_cloud, final_transformation_);
 
@@ -933,11 +852,10 @@ pclomp::NormalDistributionsTransform<PointSource, PointTarget>::computeStepLengt
 
     x_t = x + step_dir * a_t;
 
-    /*final_transformation_ = (Eigen::Translation<float, 3> (static_cast<float> (x_t (0)), static_cast<float> (x_t (1)), static_cast<float> (x_t (2))) *
+    final_transformation_ = (Eigen::Translation<float, 3> (static_cast<float> (x_t (0)), static_cast<float> (x_t (1)), static_cast<float> (x_t (2))) *
                              Eigen::AngleAxis<float> (static_cast<float> (x_t (3)), Eigen::Vector3f::UnitX ()) *
                              Eigen::AngleAxis<float> (static_cast<float> (x_t (4)), Eigen::Vector3f::UnitY ()) *
-                             Eigen::AngleAxis<float> (static_cast<float> (x_t (5)), Eigen::Vector3f::UnitZ ())).matrix ();*/
-    final_transformation_ = Sophus::SE3::exp(x_t).matrix().cast<float>();		     
+                             Eigen::AngleAxis<float> (static_cast<float> (x_t (5)), Eigen::Vector3f::UnitZ ())).matrix ();
 
     // New transformed point cloud
     // Done on final cloud to prevent wasted computation
@@ -1034,4 +952,4 @@ double pclomp::NormalDistributionsTransform<PointSource, PointTarget>::calculate
 	return (score) / static_cast<double> (trans_cloud.size());
 }
 
-#endif // PCL_REGISTRATION_NDT_IMPL2_H_
+#endif // PCL_REGISTRATION_NDT_IMPL_H_
