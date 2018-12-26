@@ -31,7 +31,14 @@ int main(int argc, char** argv) {
     std::cerr << "failed to load " << source_pcd << std::endl;
     return 0;
   }
-
+  
+  Eigen::Matrix4d tf_velo2cam;
+  tf_velo2cam<<      
+     4.276802385584e-04, -9.999672484946e-01, -8.084491683471e-03,-1.198459927713e-02,
+    -7.210626507497e-03,  8.081198471645e-03, -9.999413164504e-01,-5.403984729748e-02, 
+     9.999738645903e-01,  4.859485810390e-04, -7.206933692422e-03,-2.921968648686e-01,
+      0,0,0,1;
+      
   // downsampling
   pcl::PointCloud<pcl::PointXYZ>::Ptr downsampled(new pcl::PointCloud<pcl::PointXYZ>());
 
@@ -44,13 +51,13 @@ int main(int argc, char** argv) {
 
   voxelgrid.setInputCloud(source_cloud);
   voxelgrid.filter(*downsampled);
-  source_cloud = downsampled;
+  *source_cloud = *downsampled;
   
   std::cout<<"target size:"<<target_cloud->size()<<" source size:"<<source_cloud->size()<<std::endl;
 
   ros::Time::init();
   
-  std::cout << "--- pcl::NDT ---" << std::endl;
+  /*std::cout << "--- pcl::NDT ---" << std::endl;
   pcl::NormalDistributionsTransform<pcl::PointXYZ, pcl::PointXYZ>::Ptr ndt(new pcl::NormalDistributionsTransform<pcl::PointXYZ, pcl::PointXYZ>());
   ndt->setResolution(1.0);
   ndt->setInputTarget(target_cloud);
@@ -59,8 +66,14 @@ int main(int argc, char** argv) {
   auto t1 = ros::WallTime::now();
   ndt->align(*matched1);
   auto t2 = ros::WallTime::now();
-  std::cout << "single : " << (t2 - t1).toSec() * 1000 << "[msec]" << std::endl;
-  
+  std::cout << "single : " << (t2 - t1).toSec() * 1000 << "[msec]" << std::endl;*/
+  Eigen::Matrix4f guess=Eigen::Matrix4f::Identity();
+  guess<<
+    0.999996, -0.000780562,  -0.00256744,       1.3343,
+ 0.000791729,      0.99999,   0.00435116,   0.00705603,
+  0.00256401,  -0.00435318,     0.999987,    0.0161349,
+           0,          0,          0,          1;
+	   
   std::cout << "--- pcl::NDT_OMP ---" << std::endl;
   pclomp::NormalDistributionsTransform<pcl::PointXYZ, pcl::PointXYZ>::Ptr ndt_omp(new pclomp::NormalDistributionsTransform<pcl::PointXYZ, pcl::PointXYZ>());
   ndt_omp->setResolution(1.0);
@@ -68,13 +81,30 @@ int main(int argc, char** argv) {
   ndt_omp->setInputSource(source_cloud);
   ndt_omp->setNumThreads(8);
   ndt_omp->setNeighborhoodSearchMethod(pclomp::DIRECT7);
+  ndt_omp->setStepSize(0.1);
+  ndt_omp->setTransformationEpsilon(0.001);
+  ndt_omp->setMaximumIterations(64);
+  ndt_omp->setOulierRatio(0.30);
   pcl::PointCloud<pcl::PointXYZ>::Ptr matched(new pcl::PointCloud<pcl::PointXYZ>());
-  t1 = ros::WallTime::now();
-  ndt_omp->align(*matched);
-  t2 = ros::WallTime::now();
+  auto t1 = ros::WallTime::now();
+  ndt_omp->align(*matched,guess);
+  auto t2 = ros::WallTime::now();
   std::cout << "single : " << (t2 - t1).toSec() * 1000 << "[msec]" << std::endl; 
-  std::cout<<"Transform: \n"<<ndt_omp->getFinalTransformation()<<std::endl;
-
+  //std::cout<<"Transform: \n"<<ndt_omp->getFinalTransformation()<<std::endl;
+  Eigen::Matrix4d tf_s2s=ndt_omp->getFinalTransformation().cast<double>();
+  Eigen::Matrix4d tf_s2s_cam=tf_velo2cam*tf_s2s*tf_velo2cam.inverse();
+  std::cout<<"tf_s2s: \n"<<tf_s2s<<std::endl;
+  std::cout<<"tf_s2s_cam: \n"<<tf_s2s_cam<<std::endl;
+  Eigen::Matrix4d tf_s2s_gt;
+  tf_s2s_gt<<
+    0.999988, 0.00489403, -0.000211991,  0.0195194,
+  -0.0048943, 0.999987 ,  -0.0013073 ,  -0.0139887,
+  0.000205591, 0.00130833,  0.999999 ,     1.3645,
+           0,          0,          0,          1;
+  tf_s2s_gt=tf_velo2cam.inverse()*tf_s2s_gt*tf_velo2cam;
+  pcl::PointCloud<pcl::PointXYZ>::Ptr matched_gt(new pcl::PointCloud<pcl::PointXYZ>());
+  pcl::transformPointCloud (*source_cloud, *matched_gt,tf_s2s_gt );
+  pcl::io::savePCDFileASCII ("matched_gt.pcd", *matched_gt);
   // Saving transformed input cloud.
   pcl::io::savePCDFileASCII ("matched.pcd", *matched);
   // visulization

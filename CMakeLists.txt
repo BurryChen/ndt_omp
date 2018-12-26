@@ -80,3 +80,16 @@ target_link_libraries(match
   ndt_omp
   ${Sophus_LIBRARIES}
 )
+
+add_executable(odom_kitti
+  apps/odom_kitti.cpp
+)
+add_dependencies(odom_kitti
+  ndt_omp
+)
+target_link_libraries(odom_kitti
+  ${catkin_LIBRARIES}
+  ${PCL_LIBRARIES}
+  ndt_omp
+  ${Sophus_LIBRARIES}
+)

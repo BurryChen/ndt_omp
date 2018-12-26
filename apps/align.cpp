@@ -64,7 +64,7 @@ int main(int argc, char** argv) {
 
   voxelgrid.setInputCloud(source_cloud);
   voxelgrid.filter(*downsampled);
-  source_cloud = downsampled;
+  *source_cloud = *downsampled;
 
   ros::Time::init();
 
