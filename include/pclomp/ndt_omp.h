@@ -290,6 +290,23 @@ namespace pclomp
 				PointCloudSource &trans_cloud,
 				Eigen::Matrix<double, 6, 1> &p,
 				bool compute_hessian = true);
+			
+		/** \brief Compute derivatives of probability function w.r.t. the transformation vector.
+		  * \note Equation 6.10, 6.12 and 6.13 [Magnusson 2009].
+		  * \param[out] score_gradient the gradient vector of the probability function w.r.t. the transformation vector
+		  * \param[out] hessian the hessian matrix of the probability function w.r.t. the transformation vector
+		  * \param[in] trans_cloud transformed point cloud
+		  * \param[in] p the current transform vector
+		  * \param[in] flag_class 0-全部点，1，水平点，2-垂直点.
+		  * \param[in] compute_hessian flag to calculate hessian, unnessissary for step calculation.
+		  */
+		double
+			computeDerivatives_seg(Eigen::Matrix<double, 6, 1> &score_gradient,
+				Eigen::Matrix<double, 6, 6> &hessian,
+				PointCloudSource &trans_cloud,
+				Eigen::Matrix<double, 6, 1> &p,
+			        int flag_class,
+				bool compute_hessian = true);			
 
 		/** \brief Compute individual point contirbutions to derivatives of probability function w.r.t. the transformation vector.
 		  * \note Equation 6.10, 6.12 and 6.13 [Magnusson 2009].
@@ -384,6 +401,31 @@ namespace pclomp
 				Eigen::Matrix<double, 6, 1> &score_gradient,
 				Eigen::Matrix<double, 6, 6> &hessian,
 				PointCloudSource &trans_cloud);
+			
+		/** \brief Compute line search step length and update transform and probability derivatives using More-Thuente method.
+		  * \note Search Algorithm [More, Thuente 1994]
+		  * \param[in] x initial transformation vector, \f$ x \f$ in Equation 1.3 (Moore, Thuente 1994) and \f$ \vec{p} \f$ in Algorithm 2 [Magnusson 2009]
+		  * \param[in] step_dir descent direction, \f$ p \f$ in Equation 1.3 (Moore, Thuente 1994) and \f$ \delta \vec{p} \f$ normalized in Algorithm 2 [Magnusson 2009]
+		  * \param[in] step_init initial step length estimate, \f$ \alpha_0 \f$ in Moore-Thuente (1994) and the noramal of \f$ \delta \vec{p} \f$ in Algorithm 2 [Magnusson 2009]
+		  * \param[in] step_max maximum step length, \f$ \alpha_max \f$ in Moore-Thuente (1994)
+		  * \param[in] step_min minimum step length, \f$ \alpha_min \f$ in Moore-Thuente (1994)
+		  * \param[out] score final score function value, \f$ f(x + \alpha p) \f$ in Equation 1.3 (Moore, Thuente 1994) and \f$ score \f$ in Algorithm 2 [Magnusson 2009]
+		  * \param[in,out] score_gradient gradient of score function w.r.t. transformation vector, \f$ f'(x + \alpha p) \f$ in Moore-Thuente (1994) and \f$ \vec{g} \f$ in Algorithm 2 [Magnusson 2009]
+		  * \param[out] hessian hessian of score function w.r.t. transformation vector, \f$ f''(x + \alpha p) \f$ in Moore-Thuente (1994) and \f$ H \f$ in Algorithm 2 [Magnusson 2009]
+		  * \param[in,out] trans_cloud transformed point cloud, \f$ X \f$ transformed by \f$ T(\vec{p},\vec{x}) \f$ in Algorithm 2 [Magnusson 2009]
+		  * \param[in] flag_class 0-全部点，1，水平点，2-垂直点.
+		  * \return final step length
+		  */
+		double
+			computeStepLengthMT(const Eigen::Matrix<double, 6, 1> &x,
+				Eigen::Matrix<double, 6, 1> &step_dir,
+				double step_init,
+				double step_max, double step_min,
+				double &score,
+				Eigen::Matrix<double, 6, 1> &score_gradient,
+				Eigen::Matrix<double, 6, 6> &hessian,
+				PointCloudSource &trans_cloud,
+				int flag_class);
 
 		/** \brief Update interval of possible step lengths for More-Thuente method, \f$ I \f$ in More-Thuente (1994)
 		  * \note Updating Algorithm until some value satifies \f$ \psi(\alpha_k) \leq 0 \f$ and \f$ \phi'(\alpha_k) \geq 0 \f$

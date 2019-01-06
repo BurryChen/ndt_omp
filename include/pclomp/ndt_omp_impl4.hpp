@@ -40,7 +40,7 @@
  */
 /***********************************************************************************
  Generating from ndt_omp_impl2.hpp in which AngleAxisd (Rotation Vector) replaces Eulur Angle with a matrix Lie group approach,
- to develop RANSAC
+ to develop horizontal and vertical segment
  ***********************************************************************************/
 
 #ifndef PCL_REGISTRATION_NDT_OMP_IMPL4_H_
@@ -49,6 +49,9 @@
 #include <Eigen/LU>
 #include <sophus/so3.h>
 #include <sophus/se3.h>
+#include <pcl/registration/correspondence_rejection_sample_consensus.h>
+#include <pcl/registration/transformation_estimation_svd.h>
+#include <pcl/io/pcd_io.h>
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 template<typename PointSource, typename PointTarget>
@@ -113,10 +116,6 @@ pclomp::NormalDistributionsTransform<PointSource, PointTarget>::computeTransform
 
   // Convert initial guess matrix to 6 element transformation vector
   Eigen::Matrix<double, 6, 1> p, delta_p, score_gradient;
-  //Eigen::Vector3f init_translation = eig_transformation.translation ();
-  //Eigen::Vector3f init_rotation = eig_transformation.rotation ().eulerAngles (0, 1, 2);
-  //p << init_translation (0), init_translation (1), init_translation (2),
-  //init_rotation (0), init_rotation (1), init_rotation (2);
   // T(R,t)->李群SE(3)->李代数se(3)
   Sophus::SE3 SE3_Rt(guess.block(0,0,3,3).cast<double>(),guess.block(0,3,3,1).cast<double>());
   p=SE3_Rt.log();
@@ -126,8 +125,10 @@ pclomp::NormalDistributionsTransform<PointSource, PointTarget>::computeTransform
   double score = 0;
   double delta_p_norm;
 
+  //horizontal points-> p3,p4,p5
+  int flag_class=0;
   // Calculate derivates of initial transform vector, subsequent derivative calculations are done in the step length determination.
-  score = computeDerivatives (score_gradient, hessian, output, p);
+  score = computeDerivatives_seg (score_gradient, hessian, output, p,flag_class);
 
   while (!converged_)
   {
@@ -137,7 +138,6 @@ pclomp::NormalDistributionsTransform<PointSource, PointTarget>::computeTransform
     // Solve for decent direction using newton method, line 23 in Algorithm 2 [Magnusson 2009]
     // SVD instead of Newton method
     Eigen::JacobiSVD<Eigen::Matrix<double, 6, 6> > sv (hessian, Eigen::ComputeFullU | Eigen::ComputeFullV);
-    // Negative for maximization as opposed to minimization
     delta_p = sv.solve (-score_gradient);
     //delta_p=-hessian.inverse()*score_gradient;
     //delta_p = -hessian.lu().solve (score_gradient);
@@ -153,26 +153,22 @@ pclomp::NormalDistributionsTransform<PointSource, PointTarget>::computeTransform
     }
 
     delta_p.normalize ();
-    delta_p_norm = computeStepLengthMT (p, delta_p, delta_p_norm, step_size_, transformation_epsilon_ / 2, score, score_gradient, hessian, output);
+    delta_p_norm = computeStepLengthMT (p, delta_p, delta_p_norm, step_size_, transformation_epsilon_ / 2, score, score_gradient, hessian, output,flag_class);
     delta_p *= delta_p_norm;
 
-    /*transformation_ = (Eigen::Translation<float, 3> (static_cast<float> (delta_p (0)), static_cast<float> (delta_p (1)), static_cast<float> (delta_p (2))) *
-                       Eigen::AngleAxis<float> (static_cast<float> (delta_p (3)), Eigen::Vector3f::UnitX ()) *
-                       Eigen::AngleAxis<float> (static_cast<float> (delta_p (4)), Eigen::Vector3f::UnitY ()) *
-                       Eigen::AngleAxis<float> (static_cast<float> (delta_p (5)), Eigen::Vector3f::UnitZ ())).matrix ();*/
     // 李代数se(3)->李群SE(3)->T(R,t)
     transformation_=Sophus::SE3::exp(delta_p).matrix().cast<float>();
    
-    //p = p + delta_p;
     p=(Sophus::SE3::exp(delta_p)*Sophus::SE3::exp(p)).log();
-    //std::cout<<"\nndt_omp_impl2.hpp: "<<nr_iterations_<<"\ndelta_p"<<delta_p.transpose()<<"\np"<<p.transpose()<<std::endl<<final_transformation_<<std::endl;
+    //final_transformation_=Sophus::SE3::exp(p).matrix().cast<float>();
+    //transformPointCloud (output, output, final_transformation_);
+    std::cout<<"\nndt_omp_impl4.hpp: "<<nr_iterations_<<"\ndelta_p"<<delta_p.transpose()<<"\np"<<p.transpose()<<final_transformation_<<std::endl;
     
     // Update Visualizer (untested)
     if (update_visualizer_ != 0)
       update_visualizer_ (output, std::vector<int>(), *target_, std::vector<int>() );
 
-    if (nr_iterations_ > max_iterations_ ||
-        (nr_iterations_ && (std::fabs (delta_p_norm) < transformation_epsilon_)))
+    if (nr_iterations_ > max_iterations_ ||(std::fabs (delta_p_norm) < transformation_epsilon_))
     {
       converged_ = true;
     }
@@ -180,6 +176,61 @@ pclomp::NormalDistributionsTransform<PointSource, PointTarget>::computeTransform
     nr_iterations_++;
 
   }
+  
+  //horizontal points-> p3,p4,p5
+  /*flag_class=3;
+  converged_=false;score=0;score_gradient.setZero();hessian.setZero();
+  // Calculate derivates of initial transform vector, subsequent derivative calculations are done in the step length determination.
+  score = computeDerivatives_seg (score_gradient, hessian, output, p,flag_class);
+
+  while (!converged_)
+  {
+    // Store previous transformation
+    previous_transformation_ = transformation_;
+
+    // Solve for decent direction using newton method, line 23 in Algorithm 2 [Magnusson 2009]
+    // SVD instead of Newton method
+    Eigen::JacobiSVD<Eigen::Matrix<double, 6, 6> > sv (hessian, Eigen::ComputeFullU | Eigen::ComputeFullV);
+    delta_p = sv.solve (-score_gradient);
+    //delta_p=-hessian.inverse()*score_gradient;
+    //delta_p = -hessian.lu().solve (score_gradient);
+
+    //Calculate step length with guarnteed sufficient decrease [More, Thuente 1994]
+    delta_p_norm = delta_p.norm ();
+    // delta_p_norm 小于有效数字，delta_p_norm==delta_p_norm 为 false
+    if (delta_p_norm == 0 || delta_p_norm != delta_p_norm)
+    {
+      trans_probability_ = score / static_cast<double> (input_->points.size ());
+      converged_ = delta_p_norm == delta_p_norm;
+      return;
+    }
+
+    delta_p.normalize ();
+    delta_p_norm = computeStepLengthMT (p, delta_p, delta_p_norm, step_size_, transformation_epsilon_ / 2, score, score_gradient, hessian, output,flag_class);
+    delta_p *= delta_p_norm;
+    
+    // 李代数se(3)->李群SE(3)->T(R,t)
+    transformation_=Sophus::SE3::exp(delta_p).matrix().cast<float>();
+   
+    p=(Sophus::SE3::exp(delta_p)*Sophus::SE3::exp(p)).log();
+    //final_transformation_=Sophus::SE3::exp(p).matrix().cast<float>();
+    //transformPointCloud (output, output, final_transformation_);
+    std::cout<<"\nndt_omp_impl4.hpp: "<<nr_iterations_<<"\ndelta_p"<<delta_p.transpose()<<"\np"<<p.transpose()<<final_transformation_<<std::endl;
+    
+    // Update Visualizer (untested)
+    if (update_visualizer_ != 0)
+      update_visualizer_ (output, std::vector<int>(), *target_, std::vector<int>() );
+
+    if (nr_iterations_ > max_iterations_ || (std::fabs (delta_p_norm) < transformation_epsilon_))
+    {
+      converged_ = true;
+    }
+
+    nr_iterations_++;
+
+  }*/
+  
+  
   // std::cout<<"nr_iterations_: "<<nr_iterations_<<std::endl;
   // Store transformation probability.  The realtive differences within each scan registration are accurate
   // but the normalization constants need to be modified for it to be globally accurate
@@ -283,6 +334,8 @@ pclomp::NormalDistributionsTransform<PointSource, PointTarget>::computeDerivativ
 			//computePointDerivatives(x, point_gradient_, point_hessian_);
 			computePointDerivatives_AngleAxisd(x, p, point_gradient_, point_hessian_);
 			// Update score, gradient and hessian, lines 19-21 in Algorithm 2, according to Equations 6.10, 6.12 and 6.13, respectively [Magnusson 2009]
+			double score= updateDerivatives(score_gradient_pt, hessian_pt, point_gradient_, point_hessian_, x_trans, c_inv, compute_hessian);
+			std::cout<<x.transpose()<<" "<<score<<std::endl;
 			score_pt += updateDerivatives(score_gradient_pt, hessian_pt, point_gradient_, point_hessian_, x_trans, c_inv, compute_hessian);
 		}
 
@@ -296,6 +349,214 @@ pclomp::NormalDistributionsTransform<PointSource, PointTarget>::computeDerivativ
 		score_gradient += score_gradients[i];
 		hessian += hessians[i];
 	}
+
+	return (score);
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+template<typename PointSource, typename PointTarget> double
+pclomp::NormalDistributionsTransform<PointSource, PointTarget>::computeDerivatives_seg(Eigen::Matrix<double, 6, 1> &score_gradient,
+	Eigen::Matrix<double, 6, 6> &hessian,
+	PointCloudSource &trans_cloud,
+	Eigen::Matrix<double, 6, 1> &p,
+        int flag_class,
+	bool compute_hessian)
+{
+  // ransac update trans_cloud
+  pclomp::VoxelGridCovariance<PointSource> trans_cells_;
+  trans_cells_.setLeafSize(resolution_, resolution_, resolution_);
+  trans_cells_.setInputCloud(trans_cloud.makeShared());
+  // Initiate voxel structure.
+  trans_cells_.filter(true);
+  
+  pcl::PointCloud<pcl::PointXYZRGBNormal> trans_cells_pc;
+  trans_cells_.getGridCloud(trans_cells_pc);
+  pcl::io::savePCDFileASCII ("trans_cells_pc.pcd", trans_cells_pc);
+  
+  pcl::PointCloud<pcl::PointXYZRGBNormal> target_cells_pc;
+  target_cells_.getGridCloud(target_cells_pc);
+  pcl::io::savePCDFileASCII ("target_cells_pc.pcd", target_cells_pc);
+  
+  /*auto  trans_centroids=trans_cells_.getCentroids();
+  std::vector<int> trans_indices=trans_cells_.voxel_centroids_leaf_indices_;
+  auto  target_centroids=target_cells_.getCentroids();
+  std::vector<int> target_indices=target_cells_.voxel_centroids_leaf_indices_;
+  
+  for (int i= 0; i != trans_indices.size(); i ++)
+  {
+    int index1=target_cells_.getIndex(trans_centroids->points[i]);
+    auto leaf1=target_cells_.getLeaf(trans_centroids->points[i]);
+    auto leaf2=trans_cells_.getLeaf(trans_centroids->points[i]);    
+    if(leaf1!=NULL&&leaf2!=NULL&&leaf1->nr_points>6&&leaf2->nr_points>6)
+    {
+      Eigen::Matrix3d evecs1=leaf1->getEvecs();
+      Eigen::Vector3d evals1=leaf1->getEvals(); 
+      Eigen::Matrix3d evecs2=leaf2->getEvecs();
+      Eigen::Vector3d evals2=leaf2->getEvals();
+      //std::cout<<" evals1- "<<index1<<" "<<evals1.transpose()<<" evals2- "<<i<< " "<<evals2.transpose()<<std::endl;
+      int nr=leaf2->nr_points;
+      
+      double error_n=(evals1-evals2).norm();
+      
+      Eigen::Vector3d normal(evecs1(0,0),evecs1(1,0),evecs1(2,0));
+      normal.normalize();
+      double angle=std::acos(std::fabs(normal.dot(Eigen::Vector3d(0,0,1.0))))*180/3.1415926;
+    
+      std::cout<<nr<<"\t"<<error_n<<"\t"<<angle<<std::endl;
+    }    
+  }*/
+  
+  ///////////////////////////////////////////////////////////////////////////////////
+	score_gradient.setZero();
+	hessian.setZero();
+	double score = 0;
+  // n 个线程，n个H,J再合并; scores 用于水平面，scores2用于垂直面
+  std::vector<double> scores(num_threads_);
+  std::vector<Eigen::Matrix<double, 6, 1>, Eigen::aligned_allocator<Eigen::Matrix<double, 6, 1>>> score_gradients(num_threads_);
+  std::vector<Eigen::Matrix<double, 6, 6>, Eigen::aligned_allocator<Eigen::Matrix<double, 6, 6>>> hessians(num_threads_);	
+  for (int i = 0; i < num_threads_; i++) {
+		scores[i] = 0;
+		score_gradients[i].setZero();
+		hessians[i].setZero();
+	}
+
+	// Precompute Angular Derivatives (eq. 6.19 and 6.21)[Magnusson 2009]
+	computeAngleDerivatives(p);
+
+  std::vector<std::vector<TargetGridLeafConstPtr>> neighborhoods(num_threads_);
+  std::vector<std::vector<float>> distancess(num_threads_);
+
+	// Update gradient and hessian for each point, line 17 in Algorithm 2 [Magnusson 2009]
+#pragma omp parallel for num_threads(num_threads_) schedule(guided, 8)
+	for (int idx = 0; idx < input_->points.size(); idx++)
+	{
+		int thread_n = omp_get_thread_num();
+
+		// Original Point and Transformed Point
+		PointSource x_pt, x_trans_pt;
+		// Original Point and Transformed Point (for math)
+		Eigen::Vector3d x, x_trans;
+		// Occupied Voxel
+		TargetGridLeafConstPtr cell;
+		// Inverse Covariance of Occupied Voxel
+		Eigen::Matrix3d c_inv;
+
+		// Initialize Point Gradient and Hessian
+		Eigen::Matrix<float, 4, 6> point_gradient_;
+		Eigen::Matrix<float, 24, 6> point_hessian_;
+		point_gradient_.setZero();
+		point_gradient_.block<3, 3>(0, 0).setIdentity();
+		point_hessian_.setZero();
+
+		x_trans_pt = trans_cloud.points[idx];
+
+		auto& neighborhood = neighborhoods[thread_n];
+		auto& distances = distancess[thread_n];
+
+		// Find nieghbors (Radius search has been experimentally faster than direct neighbor checking.
+		// Experiments show that DIRECT1 is faster and stable with the current state with init, even more accurate.
+		switch (search_method) {
+		case KDTREE:
+			target_cells_.radiusSearch(x_trans_pt, resolution_, neighborhood, distances);
+			break;
+		case DIRECT26:
+			target_cells_.getNeighborhoodAtPoint(x_trans_pt, neighborhood);
+			break;
+		default:
+		case DIRECT7:
+			target_cells_.getNeighborhoodAtPoint7(x_trans_pt, neighborhood);
+			break;
+		case DIRECT1:
+			target_cells_.getNeighborhoodAtPoint1(x_trans_pt, neighborhood);
+			break;
+		}
+
+		double score_pt = 0;
+		Eigen::Matrix<double, 6, 1> score_gradient_pt = Eigen::Matrix<double, 6, 1>::Zero();
+		Eigen::Matrix<double, 6, 6> hessian_pt = Eigen::Matrix<double, 6, 6>::Zero();
+
+		double angle2xy=0,angle2xz=0,angle2yz=0;
+		for (typename std::vector<TargetGridLeafConstPtr>::iterator neighborhood_it = neighborhood.begin(); neighborhood_it != neighborhood.end(); neighborhood_it++)
+		{
+			cell = *neighborhood_it;
+			x_pt = input_->points[idx];
+			x = Eigen::Vector3d(x_pt.x, x_pt.y, x_pt.z);
+
+			x_trans = Eigen::Vector3d(x_trans_pt.x, x_trans_pt.y, x_trans_pt.z);
+
+			// Denorm point, x_k' in Equations 6.12 and 6.13 [Magnusson 2009]
+			x_trans -= cell->getMean();
+			// Uses precomputed covariance for speed.
+			c_inv = cell->getInverseCov();
+			
+      Eigen::Matrix3d evecs1=cell->getEvecs();
+      Eigen::Vector3d evals1=cell->getEvals(); 
+      auto leaf2=trans_cells_.getLeaf(x_trans_pt); 
+      Eigen::Matrix3d evecs2=leaf2->getEvecs();
+      Eigen::Vector3d evals2=leaf2->getEvals();
+      //std::cout<<" evals1- "<<cell->nr_points<<" "<<evals1.transpose()<<" evals2- "<<leaf2->nr_points<<" "<<evals2.transpose()<<std::endl;
+      int nr=leaf2->nr_points;
+      //if(cell->nr_points<100||leaf2->nr_points<100||std::abs(cell->nr_points-leaf2->nr_points)>50)  {continue;continue;}
+      double error_n=(evals1-evals2).norm();
+      
+      Eigen::Vector3d normal(evecs1(0,0),evecs1(1,0),evecs1(2,0));
+      normal.normalize();
+      //double angle=std::acos(std::fabs(normal.dot(Eigen::Vector3d(0,0,1.0))))*180/3.1415926;
+      angle2xy=std::acos(std::fabs(normal(2)))*180/3.1415926;
+      angle2xz=std::acos(std::fabs(normal(1)))*180/3.1415926;
+      angle2yz=std::acos(std::fabs(normal(0)))*180/3.1415926;
+
+			// Compute derivative of transform function w.r.t. transform vector, J_E and H_E in Equations 6.18 and 6.20 [Magnusson 2009]
+			//computePointDerivatives(x, point_gradient_, point_hessian_);
+			computePointDerivatives_AngleAxisd(x, p, point_gradient_, point_hessian_);
+			// Update score, gradient and hessian, lines 19-21 in Algorithm 2, according to Equations 6.10, 6.12 and 6.13, respectively [Magnusson 2009]
+			double score= updateDerivatives(score_gradient_pt, hessian_pt, point_gradient_, point_hessian_, x_trans, c_inv, compute_hessian);
+			std::cout<<x.transpose()<<" "<<score<<std::endl;
+			//trans_cloud.points[idx].data[3]=score*100;
+			score_pt += updateDerivatives(score_gradient_pt, hessian_pt, point_gradient_, point_hessian_, x_trans, c_inv, compute_hessian);
+		}
+	
+		if(flag_class==0)  
+		{
+		  scores[thread_n] += score_pt;
+		  score_gradients[thread_n].noalias() += score_gradient_pt;
+		  hessians[thread_n].noalias() += hessian_pt;	  	  
+		}
+		else if(flag_class==1&&angle2xy<10)  
+		{
+		  scores[thread_n] += score_pt;
+		  score_gradients[thread_n].noalias() += score_gradient_pt;
+		  hessians[thread_n].noalias() += hessian_pt;	  	  
+		}
+		else if(flag_class==2&&angle2xy>80)  
+		{
+		  scores[thread_n] += score_pt;
+		  score_gradients[thread_n].noalias() += score_gradient_pt;
+		  hessians[thread_n].noalias() += hessian_pt;	  	  
+		}
+                //std::cout<<nr<<"\t"<<error_n<<"\t"<<angle<<std::endl;
+	}
+
+  for (int i = 0; i < num_threads_; i++) {
+		score += scores[i];
+		score_gradient += score_gradients[i];
+		hessian += hessians[i];
+	}
+	
+  if(flag_class==1)
+  {
+    hessian.block(0,0,6,2).setZero();
+    hessian.block(0,0,2,6).setZero(); 
+    hessian.block(0,5,6,1).setZero();
+    hessian.block(5,0,1,6).setZero(); 
+    score_gradient(0)=score_gradient(1)=score_gradient(5)=0;  
+  }
+  if(flag_class==2)
+  {
+    hessian.block(0,2,6,3).setZero();
+    hessian.block(2,0,3,6).setZero();
+    score_gradient(2)=score_gradient(3)=score_gradient(4)=0;  
+  }
 
 	return (score);
 }
@@ -837,7 +1098,7 @@ pclomp::NormalDistributionsTransform<PointSource, PointTarget>::trialValueSelect
 template<typename PointSource, typename PointTarget> double
 pclomp::NormalDistributionsTransform<PointSource, PointTarget>::computeStepLengthMT (const Eigen::Matrix<double, 6, 1> &x, Eigen::Matrix<double, 6, 1> &step_dir, double step_init, double step_max,
                                                                                   double step_min, double &score, Eigen::Matrix<double, 6, 1> &score_gradient, Eigen::Matrix<double, 6, 6> &hessian,
-                                                                                  PointCloudSource &trans_cloud)
+                                                                                  PointCloudSource &trans_cloud,int flag_class)
 {
   // Set the value of phi(0), Equation 1.3 [More, Thuente 1994]
   double phi_0 = -score;
@@ -900,7 +1161,7 @@ pclomp::NormalDistributionsTransform<PointSource, PointTarget>::computeStepLengt
 
   // Updates score, gradient and hessian.  Hessian calculation is unessisary but testing showed that most step calculations use the
   // initial step suggestion and recalculation the reusable portions of the hessian would intail more computation time.
-  score = computeDerivatives (score_gradient, hessian, trans_cloud, x_t, true);
+  score = computeDerivatives_seg (score_gradient, hessian, trans_cloud, x_t, flag_class,true);
 
   // Calculate phi(alpha_t)
   double phi_t = -score;
@@ -945,7 +1206,7 @@ pclomp::NormalDistributionsTransform<PointSource, PointTarget>::computeStepLengt
     transformPointCloud (*input_, trans_cloud, final_transformation_);
 
     // Updates score, gradient. Values stored to prevent wasted computation.
-    score = computeDerivatives (score_gradient, hessian, trans_cloud, x_t, false);
+    score = computeDerivatives_seg (score_gradient, hessian, trans_cloud, x_t, flag_class,false);
 
     // Calculate phi(alpha_t+)
     phi_t = -score;

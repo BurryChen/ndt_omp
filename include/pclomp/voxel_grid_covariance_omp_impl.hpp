@@ -482,6 +482,38 @@ pclomp::VoxelGridCovariance<PointT>::getDisplayCloud (pcl::PointCloud<pcl::Point
   }
 }
 
+//////////////////////////////////////////////////////////////////////////////////////////
+template<typename PointT> void
+pclomp::VoxelGridCovariance<PointT>::getGridCloud (pcl::PointCloud<pcl::PointXYZRGBNormal>& grid_cloud)
+{
+  grid_cloud.clear ();
+  Eigen::Vector3d cell_mean,evals;
+  pcl::PointXYZRGBNormal point;
+  Eigen::Matrix3d evecs1;
+
+  // Generate points for each occupied grid.
+  for (auto it = leaves_.begin (); it != leaves_.end (); ++it)
+  {
+    Leaf& leaf = it->second;
+
+    if (leaf.nr_points >= min_points_per_voxel_)
+    {
+      cell_mean = leaf.mean_; 
+      point.x=static_cast<float> (cell_mean (0)), point.y=static_cast<float> (cell_mean (1)), point.z=static_cast<float> (cell_mean (2));
+
+      evals=leaf.getEvals()*1000; 
+      point.r=static_cast<int>(evals(2)),point.g=static_cast<int>(evals(1)),point.b=static_cast<int>(evals(0));
+            
+      evecs1=leaf.getEvecs();
+      Eigen::Vector3d normal(evecs1(0,0),evecs1(1,0),evecs1(2,0));
+      normal.normalize();
+      point.normal_x=static_cast<float>(normal(0));point.normal_y=static_cast<float>(normal(1));point.normal_z=static_cast<float>(normal(2));
+      
+      grid_cloud.push_back (point);
+    }
+  }
+}
+
 #define PCL_INSTANTIATE_VoxelGridCovariance(T) template class PCL_EXPORTS pcl::VoxelGridCovariance<T>;
 
 #endif    // PCL_VOXEL_GRID_COVARIANCE_IMPL_H_

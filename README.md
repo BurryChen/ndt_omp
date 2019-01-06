@@ -45,3 +45,9 @@ Several methods for neighbor voxel search are implemented. If you select pclomp:
 
 <img src="data/screenshot.png" height="400pix" /><br>
 Red: target, Green: source, Blue: aligned
+
+
+### 2018.12.27
+python debug: 
+python -m pdb '/home/whu/slam_ws/src/hdl_graph_slam/scripts/error_odom_png.py' '/home/whu/data/ndt_odom_KITTI/KITTI_odom_ndt_s2s_XX'
+

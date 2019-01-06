@@ -379,6 +379,31 @@ namespace pclomp
 	  int getNeighborhoodAtPoint7(const PointT& reference_point, std::vector<LeafConstPtr> &neighbors) const ;
 	  int getNeighborhoodAtPoint1(const PointT& reference_point, std::vector<LeafConstPtr> &neighbors) const ;
 
+      /** \brief Get the voxel containing point p.
+       * \param[in] index the index of the leaf structure node
+       * \return const pointer to leaf structure
+       */
+      inline int
+      getIndex (PointT &p)
+      {
+        // Generate index associated with p
+        int ijk0 = static_cast<int> (floor (p.x * inverse_leaf_size_[0]) - min_b_[0]);
+        int ijk1 = static_cast<int> (floor (p.y * inverse_leaf_size_[1]) - min_b_[1]);
+        int ijk2 = static_cast<int> (floor (p.z * inverse_leaf_size_[2]) - min_b_[2]);
+
+        // Compute the centroid leaf index
+        int idx = ijk0 * divb_mul_[0] + ijk1 * divb_mul_[1] + ijk2 * divb_mul_[2];
+
+        // Find leaf associated with index
+        std::vector<int>::iterator iter = std::find (voxel_centroids_leaf_indices_.begin(),voxel_centroids_leaf_indices_.end(),idx);
+        if (iter != voxel_centroids_leaf_indices_.end())
+        {
+          return std::distance(voxel_centroids_leaf_indices_.begin(), iter);
+        }
+        else
+          return -1;
+      }
+      
       /** \brief Get the leaf structure map
        * \return a map contataining all leaves
        */
@@ -404,6 +429,12 @@ namespace pclomp
        */
       void
       getDisplayCloud (pcl::PointCloud<pcl::PointXYZ>& cell_cloud);
+       
+      /** \brief Get a cloud to visualize each grid with mean, eigenvalue and normal.
+       * \param[out] grid_cloud a cloud 
+       */
+      void
+      getGridCloud (pcl::PointCloud<pcl::PointXYZRGBNormal>& grid_cloud);
 
       /** \brief Search for the k-nearest occupied voxels for the given query point.
        * \note Only voxels containing a sufficient number of points are used.
@@ -518,7 +549,8 @@ namespace pclomp
         return (radiusSearch (cloud.points[index], radius, k_leaves, k_sqr_distances, max_nn));
       }
 
-    protected:
+    //protected:
+    public:
 
       /** \brief Filter cloud and initializes voxel structure.
        * \param[out] output cloud containing centroids of voxels containing a sufficient number of points

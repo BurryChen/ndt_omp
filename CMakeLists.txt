@@ -93,3 +93,16 @@ target_link_libraries(odom_kitti
   ndt_omp
   ${Sophus_LIBRARIES}
 )
+
+add_executable(workflow_scanner
+  apps/workflow_scanner.cpp
+)
+add_dependencies(workflow_scanner
+  ndt_omp
+)
+target_link_libraries(workflow_scanner
+  ${catkin_LIBRARIES}
+  ${PCL_LIBRARIES}
+  ndt_omp
+  ${Sophus_LIBRARIES}
+)

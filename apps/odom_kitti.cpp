@@ -37,15 +37,15 @@ int pcdfilter(const struct dirent *filename)    //文件筛选器
 }
 
 int main(int argc, char** argv) {
-  if(argc != 2) {
-    std::cout << "usage: odom_kitti sequence" << std::endl;
+  if(argc != 3) {
+    std::cout << "usage: odom_kitti res_dir sequence" << std::endl;
     return 0;
   }
   
-  std::string seq=argv[1];
+  std::string res_dir=argv[1];
+  std::string seq=argv[2];
   std::string pcdsdir="/media/whu/HD_CHEN_2T/02data/KITTI_odometry/velobag/velo_"+seq+".bag_pcd";
   std::string gt_file="/home/whu/data/loam_KITTI/devkit_old/cpp/data/poses/"+seq+".txt";
-  std::string res_dir="/home/whu/data/ndt_odom_KITTI/KITTI_odom_ndt_s2s_step";
   std::string odom_file=res_dir+"/data/KITTI_"+seq+"_odom.txt";
   std::string scan_error_file=res_dir+"/errors/KITTI_"+seq+"_scan_error.txt";
   std::string odom_error_file=res_dir+"/errors/KITTI_"+seq+"_odom_error.txt";
@@ -81,17 +81,25 @@ int main(int argc, char** argv) {
   pcl::VoxelGrid<pcl::PointXYZ> voxelgrid;
   voxelgrid.setLeafSize(0.1f, 0.1f, 0.1f);
   
+  voxelgrid.setInputCloud(target_cloud);
+  voxelgrid.filter(*downsampled);
+  *target_cloud = *downsampled;
+
+  voxelgrid.setInputCloud(source_cloud);
+  voxelgrid.filter(*downsampled);
+  *source_cloud = *downsampled;
+  
   ros::Time::init(); 
   
   std::cout << "--- pcl::NDT_OMP ---" << std::endl;
   pclomp::NormalDistributionsTransform<pcl::PointXYZ, pcl::PointXYZ>::Ptr ndt_omp(new pclomp::NormalDistributionsTransform<pcl::PointXYZ, pcl::PointXYZ>());
   ndt_omp->setResolution(1.0);
   ndt_omp->setNumThreads(8);
-  ndt_omp->setNeighborhoodSearchMethod(pclomp::DIRECT7);
+  ndt_omp->setNeighborhoodSearchMethod(pclomp::DIRECT1);
   ndt_omp->setStepSize(0.1);
-  ndt_omp->setTransformationEpsilon(0.001);
+  ndt_omp->setTransformationEpsilon(0.01);
   ndt_omp->setMaximumIterations(64);
-  ndt_omp->setOulierRatio(0.30);
+  ndt_omp->setOulierRatio(0.55);
   pcl::PointCloud<pcl::PointXYZ>::Ptr matched(new pcl::PointCloud<pcl::PointXYZ>());
 
   // pcd file
@@ -109,7 +117,6 @@ int main(int argc, char** argv) {
   Eigen::Matrix4d tf_s2s_cam=Eigen::Matrix4d::Identity();
   Eigen::Matrix4d odom=Eigen::Matrix4d::Identity();
   Eigen::Matrix4d tf_s2s_error=Eigen::Matrix4d::Identity();
-  Eigen::Matrix4d odom_error=Eigen::Matrix4d::Identity();
   FILE *fp_odom = fopen(odom_file.c_str(),"w+");
   fprintf(fp_odom,"%le %le %le %le %le %le %le %le %le %le %le %le\n",
 	    odom(0,0),odom(0,1),odom(0,2),odom(0,3),
@@ -120,11 +127,6 @@ int main(int argc, char** argv) {
 	    tf_s2s_error(0,0),tf_s2s_error(0,1),tf_s2s_error(0,2),tf_s2s_error(0,3),
 	    tf_s2s_error(1,0),tf_s2s_error(1,1),tf_s2s_error(1,2),tf_s2s_error(1,3),
 	    tf_s2s_error(2,0),tf_s2s_error(2,1),tf_s2s_error(2,2),tf_s2s_error(2,3)); 
-  FILE *fp_odom_error = fopen(odom_error_file.c_str(),"w+");
-  fprintf(fp_odom_error,"%le %le %le %le %le %le %le %le %le %le %le %le\n",
-	    odom_error(0,0),odom_error(0,1),odom_error(0,2),odom_error(0,3),
-	    odom_error(1,0),odom_error(1,1),odom_error(1,2),odom_error(1,3),
-	    odom_error(2,0),odom_error(2,1),odom_error(2,2),odom_error(2,3));  
   
   for(int i= 0; i <n-1; i ++)
   {
@@ -168,12 +170,6 @@ int main(int argc, char** argv) {
     Sophus::SE3 SE3_Rt(tf_s2s_error.block(0,0,3,3),tf_s2s_error.block(0,3,3,1));
     std::cout<<"tf_s2s_error: "<<SE3_Rt.log().transpose()<<std::endl;
     
-    Eigen::Matrix4d odom_error=poses_cam[i+1].inverse()*odom;
-    //std::cout<<"odom : \n"<<odom<<std::endl;
-    //std::cout<<"odom_error : \n"<<odom_error<<std::endl;
-    Sophus::SE3 SE3_Rt2(odom_error.block(0,0,3,3),odom_error.block(0,3,3,1));
-    std::cout<<"odom_error: "<<SE3_Rt2.log().transpose()<<std::endl;
-    
     fprintf(fp_odom,"%le %le %le %le %le %le %le %le %le %le %le %le\n",
 	    odom(0,0),odom(0,1),odom(0,2),odom(0,3),
 	    odom(1,0),odom(1,1),odom(1,2),odom(1,3),
@@ -182,15 +178,10 @@ int main(int argc, char** argv) {
 	    tf_s2s_error(0,0),tf_s2s_error(0,1),tf_s2s_error(0,2),tf_s2s_error(0,3),
 	    tf_s2s_error(1,0),tf_s2s_error(1,1),tf_s2s_error(1,2),tf_s2s_error(1,3),
 	    tf_s2s_error(2,0),tf_s2s_error(2,1),tf_s2s_error(2,2),tf_s2s_error(2,3));
-    fprintf(fp_odom_error,"%le %le %le %le %le %le %le %le %le %le %le %le\n",
-	    odom_error(0,0),odom_error(0,1),odom_error(0,2),odom_error(0,3),
-	    odom_error(1,0),odom_error(1,1),odom_error(1,2),odom_error(1,3),
-	    odom_error(2,0),odom_error(2,1),odom_error(2,2),odom_error(2,3));
   
   }
   fclose(fp_odom);
   fclose(fp_scan_error);
-  fclose(fp_odom_error);
     
   return 0;
 }
