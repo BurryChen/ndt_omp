@@ -51,3 +51,39 @@ Red: target, Green: source, Blue: aligned
 python debug: 
 python -m pdb '/home/whu/slam_ws/src/hdl_graph_slam/scripts/error_odom_png.py' '/home/whu/data/ndt_odom_KITTI/KITTI_odom_ndt_s2s_XX'
 
+### 2020.5.6
+'/home/whu/slam_ws/devel/lib/ndt_omp/align' '/home/whu/slam_ws/src/ndt_omp/data/251370668.pcd' '/home/whu/slam_ws/src/ndt_omp/data/251371071.pcd' 
+--- pcl::NDT ---
+single : 412.674[msec]
+10times: 4034.14[msec]
+fitness: 0.213937
+
+--- pclomp::NDT (KDTREE, 1 threads) ---
+single : 355.71[msec]
+10times: 3497.31[msec]
+fitness: 0.213892
+
+--- pclomp::NDT (DIRECT7, 1 threads) ---
+single : 164.942[msec]
+10times: 1643.96[msec]
+fitness: 0.21415
+
+--- pclomp::NDT (DIRECT1, 1 threads) ---
+single : 42.0168[msec]
+10times: 375.549[msec]
+fitness: 0.208487
+
+--- pclomp::NDT (KDTREE, 8 threads) ---
+single : 84.2158[msec]
+10times: 793.837[msec]
+fitness: 0.213892
+
+--- pclomp::NDT (DIRECT7, 8 threads) ---
+single : 42.9538[msec]
+10times: 390.322[msec]
+fitness: 0.21415
+
+--- pclomp::NDT (DIRECT1, 8 threads) ---
+single : 14.465[msec]
+10times: 112.421[msec]
+fitness: 0.208487
